@@ -1,4 +1,6 @@
 from mpi4py import MPI
+from petsc4py import PETSc
+
 import dolfinx.fem.petsc
 import numpy as np
 import ufl
@@ -70,24 +72,19 @@ As = dolfinx.fem.petsc.assemble_matrix(compiled_solid, bcs=bcs)
 As.assemble()
 compiled_fluid = dolfinx.fem.form(kernel * dxF)
 
-deactivate_bc = True
-if deactivate_bc:
-    bcs_deac = [bcF, bcS, bc_deactivate]
-else:
-    bcs_deac = [bcF, bcS]
 
-Af = dolfinx.fem.petsc.assemble_matrix(compiled_fluid, bcs=bcs_deac, diag=0.0)
-dolfinx.cpp.fem.petsc.insert_diagonal(
-    Af, V._cpp_object, [bc._cpp_object for bc in bcs], 1.0
-)
+Af = dolfinx.fem.petsc.assemble_matrix(compiled_fluid, bcs=bcs, diag=1.0)
 Af.assemble()
-Af.setValuesLocal([7], [6], [-12.0])
+for bc in [bc_deactivate]:
+    dofs, _ = bc._cpp_object.dof_indices()
+    Af.zeroRowsLocal(dofs, diag=0)
 Af.assemble()
-
 A = As + Af
-print("As=", As[:, :])
-print("Af=", Af[:, :])
-print("A=", A[:, :])
+
+if MPI.COMM_WORLD.size == 1:
+    print("As=", As[:, :])
+    print("Af=", Af[:, :])
+    print("A=", A[:, :])
 
 x = ufl.SpatialCoordinate(mesh)
 f_S = 2  # -(x[0] ** 2)
@@ -97,8 +94,10 @@ Lf = ufl.inner(f_F, v) * dxF
 
 bs = dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(Ls))
 dolfinx.fem.petsc.apply_lifting(bs, [compiled_solid], bcs=[bcs])
+bs.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 [bc.set(bs.array_w) for bc in [bcS]]
 bf = dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(Lf))
+bf.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 # Zero out the disappearing basis function
 bc_deactivate.set(bf.array_w, alpha=0.0)
 dolfinx.fem.petsc.apply_lifting(bf, [compiled_fluid], bcs=[bcs])
@@ -106,7 +105,6 @@ dolfinx.fem.petsc.apply_lifting(bf, [compiled_fluid], bcs=[bcs])
 
 b = bs + bf
 
-from petsc4py import PETSc
 
 ksp = PETSc.KSP().create(mesh.comm)
 ksp.setType("preonly")
@@ -117,40 +115,7 @@ ksp.setErrorIfNotConverged(True)
 ksp.setOperators(A)
 x = dolfinx.fem.Function(V)
 ksp.solve(b, x.x.petsc_vec)
-
-fluid_mesh, fluid_map, _, _ = dolfinx.mesh.create_submesh(
-    mesh, mesh.topology.dim, ct.find(fluid_marker)
-)
-Vf = dolfinx.fem.functionspace(fluid_mesh, ("Lagrange", 1))
-uf = dolfinx.fem.Function(Vf)
-num_fluid_cells = fluid_mesh.topology.index_map(fluid_mesh.topology.dim).size_local
-parent_cells = fluid_map.sub_topology_to_topology(
-    np.arange(num_fluid_cells, dtype=np.int32), False
-)
-uf.interpolate(
-    x, cells0=parent_cells, cells1=np.arange(num_fluid_cells, dtype=np.int32)
-)
-uf.x.scatter_forward()
-if_submesh = dolfinx.mesh.locate_entities(
-    fluid_mesh, fluid_mesh.topology.dim - 1, interface
-)
-if_fluid_sm = dolfinx.mesh.locate_entities(
-    fluid_mesh, fluid_mesh.topology.dim - 1, interface
-)
-bc_F_deac = dolfinx.fem.dirichletbc(dolfinx.fem.Constant(mesh, 0.0), if_submesh, Vf)
-bc_F_deac.set(uf.x.array, alpha=0.0)
-
-solid_mesh, solid_map, _, _ = dolfinx.mesh.create_submesh(
-    mesh, mesh.topology.dim, ct.find(solid_marker)
-)
-
-Vs = dolfinx.fem.functionspace(solid_mesh, ("Lagrange", 1))
-us = dolfinx.fem.Function(Vs)
-num_solid_cells = solid_mesh.topology.index_map(solid_mesh.topology.dim).size_local
-us.interpolate(
-    x, cells0=parent_cells, cells1=np.arange(num_solid_cells, dtype=np.int32)
-)
-us.x.scatter_forward()
+x.x.scatter_forward()
 
 with dolfinx.io.XDMFFile(mesh.comm, "output/solution.xdmf", "w") as file:
     file.write_mesh(mesh)
