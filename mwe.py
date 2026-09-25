@@ -4,8 +4,8 @@ import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 
-# mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 10, 10)
-mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, 12)
+# mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 11, 10)
+mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, 13)
 
 
 def fluid(x, tol=1e-14):
@@ -51,6 +51,27 @@ bcs = [bcF, bcS]
 
 mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 interface_facets = dolfinx.mesh.locate_entities(mesh, mesh.topology.dim - 1, interface)
+
+facet_to_cell = mesh.topology.connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+num_cells_local = cm.size_local
+fm = mesh.topology.index_map(mesh.topology.dim - 1)
+num_facets_local = fm.size_local
+
+interface_facets_manual = []
+for facet in range(num_facets_local):
+    neighbor_cells = facet_to_cell.links(facet)
+    if len(neighbor_cells) == 2:
+        cell_a, cell_b = neighbor_cells
+        if vec.array[cell_a] != vec.array[cell_b]:
+            interface_facets_manual.append(facet)
+
+interface_facets = np.array(interface_facets_manual, dtype=np.int32)
+
+total_interface_facets_found = MPI.COMM_WORLD.allreduce(
+    interface_facets.size, op=MPI.SUM
+)
+
+assert total_interface_facets_found > 0, "Interface not found."
 dofs_interface = dolfinx.fem.locate_dofs_topological(
     V, mesh.topology.dim - 1, interface_facets
 )
@@ -81,13 +102,16 @@ Af.assemble()
 A = As + Af
 
 if MPI.COMM_WORLD.size == 1:
-    print("As=", As[:, :])
-    print("Af=", Af[:, :])
-    print("A=", A[:, :])
+    print("As =", As[:, :])
+    print("Af =", Af[:, :])
+    print("A =", A[:, :])
+
+    interface_x = V.tabulate_dof_coordinates()[dofs_interface[0]]
+    print(f"{interface_x[0] = :.2f}")
 
 x = ufl.SpatialCoordinate(mesh)
-f_S = 2  # -(x[0] ** 2)
-f_F = dolfinx.fem.Constant(mesh, 0.0)  # * x[0] ** 2
+f_S = 2
+f_F = dolfinx.fem.Constant(mesh, 0.0)
 Ls = ufl.inner(f_S, v) * dxS
 Lf = ufl.inner(f_F, v) * dxF
 
@@ -135,7 +159,6 @@ if MPI.COMM_WORLD.size == 1 and mesh.topology.dim == 1:
     plt.figure()
     plt.plot(tt[dof_sorting], x.x.array[dof_sorting], "k-")
 
-    print(f"{dofs_interface = }")
     plt.axvline(
         x=tt[dofs_interface[0]], color="black", alpha=0.4, lw=0.3, label="interface"
     )
