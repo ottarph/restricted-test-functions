@@ -1,9 +1,8 @@
-from mpi4py import MPI
-from petsc4py import PETSc
-
 import dolfinx.fem.petsc
 import numpy as np
 import ufl
+from mpi4py import MPI
+from petsc4py import PETSc
 
 # mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 10, 10)
 mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, 12)
@@ -120,3 +119,24 @@ x.x.scatter_forward()
 with dolfinx.io.XDMFFile(mesh.comm, "output/solution.xdmf", "w") as file:
     file.write_mesh(mesh)
     file.write_function(x)
+
+if MPI.COMM_WORLD.size == 1:
+    if mesh.topology.dim == 1:
+        import matplotlib.pyplot as plt
+
+        tt = x.function_space.tabulate_dof_coordinates()[:, 0]
+        dof_sorting = np.argsort(tt)
+        plt.figure()
+        plt.plot(tt[dof_sorting], x.x.array[dof_sorting], "k-")
+
+        print(f"{dofs_interface = }")
+        plt.axvline(
+            x=tt[dofs_interface[0]], color="black", alpha=0.4, lw=0.3, label="interface"
+        )
+
+        plt.legend()
+        plt.savefig("output/solution.svg")
+        plt.show()
+
+    elif mesh.topology.dim == 2:
+        pass

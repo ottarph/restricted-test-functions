@@ -17,5 +17,7 @@ solid domain and a straight line in the fluid domain. The solution will be conti
 function value but not flux along the interface. Final boundary conditions are $u = 0.3$ 
 at $x = 0$ and $u = 1.2$ at $x = 1$.
 
+![One-dimensional solution of problem](output/solution.svg)
+
 ## Requirements
 Tested on ``dolfinx 0.11.0``.
