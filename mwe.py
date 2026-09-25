@@ -124,23 +124,22 @@ with dolfinx.io.XDMFFile(mesh.comm, "output/solution.xdmf", "w") as file:
     file.write_mesh(mesh)
     file.write_function(x)
 
-if MPI.COMM_WORLD.size == 1:
-    if mesh.topology.dim == 1:
-        import matplotlib.pyplot as plt
+if MPI.COMM_WORLD.size == 1 and mesh.topology.dim == 1:
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
 
-        tt = x.function_space.tabulate_dof_coordinates()[:, 0]
-        dof_sorting = np.argsort(tt)
-        plt.figure()
-        plt.plot(tt[dof_sorting], x.x.array[dof_sorting], "k-")
+    mpl.rcParams["svg.hashsalt"] = "restricted-test-functions"
 
-        print(f"{dofs_interface = }")
-        plt.axvline(
-            x=tt[dofs_interface[0]], color="black", alpha=0.4, lw=0.3, label="interface"
-        )
+    tt = x.function_space.tabulate_dof_coordinates()[:, 0]
+    dof_sorting = np.argsort(tt)
+    plt.figure()
+    plt.plot(tt[dof_sorting], x.x.array[dof_sorting], "k-")
 
-        plt.legend()
-        plt.savefig("output/solution.svg")
-        plt.show()
+    print(f"{dofs_interface = }")
+    plt.axvline(
+        x=tt[dofs_interface[0]], color="black", alpha=0.4, lw=0.3, label="interface"
+    )
 
-    elif mesh.topology.dim == 2:
-        pass
+    plt.legend()
+    plt.savefig("output/solution.svg", metadata={"Date": None})
+    plt.show()
