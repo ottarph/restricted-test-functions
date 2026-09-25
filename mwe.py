@@ -1,11 +1,12 @@
 import dolfinx.fem.petsc
 import numpy as np
+import scifem
 import ufl
 from mpi4py import MPI
 from petsc4py import PETSc
 
-# mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 11, 10)
-mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, 13)
+# mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 10, 10)
+mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, 12)
 
 
 def fluid(x, tol=1e-14):
@@ -49,23 +50,7 @@ bcS = dolfinx.fem.dirichletbc(
 )
 bcs = [bcF, bcS]
 
-mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
-interface_facets = dolfinx.mesh.locate_entities(mesh, mesh.topology.dim - 1, interface)
-
-facet_to_cell = mesh.topology.connectivity(mesh.topology.dim - 1, mesh.topology.dim)
-num_cells_local = cm.size_local
-fm = mesh.topology.index_map(mesh.topology.dim - 1)
-num_facets_local = fm.size_local
-
-interface_facets_manual = []
-for facet in range(num_facets_local):
-    neighbor_cells = facet_to_cell.links(facet)
-    if len(neighbor_cells) == 2:
-        cell_a, cell_b = neighbor_cells
-        if vec.array[cell_a] != vec.array[cell_b]:
-            interface_facets_manual.append(facet)
-
-interface_facets = np.array(interface_facets_manual, dtype=np.int32)
+interface_facets = scifem.find_interface(ct, solid_marker, fluid_marker)
 
 total_interface_facets_found = MPI.COMM_WORLD.allreduce(
     interface_facets.size, op=MPI.SUM
@@ -144,9 +129,16 @@ x = dolfinx.fem.Function(V)
 ksp.solve(b, x.x.petsc_vec)
 x.x.scatter_forward()
 
-with dolfinx.io.XDMFFile(mesh.comm, "output/solution.xdmf", "w") as file:
-    file.write_mesh(mesh)
-    file.write_function(x)
+if V.element.basix_element.degree == 1:
+    print("XDMF WRITE")
+    with dolfinx.io.XDMFFile(mesh.comm, "output/solution.xdmf", "w") as file:
+        file.write_mesh(mesh)
+        file.write_function(x)
+else:
+    print("VTX WRITE")
+    writer = dolfinx.io.VTXWriter(mesh.comm, "output/solution.bp", [x])
+    writer.write(0)
+    writer.close()
 
 if MPI.COMM_WORLD.size == 1 and mesh.topology.dim == 1:
     import matplotlib as mpl
