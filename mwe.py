@@ -96,13 +96,17 @@ dolfinx.fem.petsc.apply_lifting(bs, [compiled_solid], bcs=[bcs])
 bs.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 [bc.set(bs.array_w) for bc in [bcS]]
 bf = dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(Lf))
-bf.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 # Zero out the disappearing basis function
 bc_deactivate.set(bf.array_w, alpha=0.0)
 dolfinx.fem.petsc.apply_lifting(bf, [compiled_fluid], bcs=[bcs])
+# Scatter reverse should happen after bc-treatment, which is local.
+bf.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+
 [bc.set(bf.array_w) for bc in [bcF]]
 
 b = bs + bf
+# Final forward scatter, probably not needed.
+# b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 
 
 ksp = PETSc.KSP().create(mesh.comm)
