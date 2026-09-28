@@ -27,3 +27,5 @@ Tested on ``dolfinx 0.11.0``.
 ### Sparsity pattern of above problem with degree 1 Lagrange elements in one dimension.
 ![One-dimensional solution of problem](output/sparsity.svg)
 
+### One-dimensional solution of a manufactured problem with error and L^2-error against alpha.
+![One-dimensional solution of problem, error of solution, and L^2-error against alpha. Not same manufactured solution](output/solution_without_restriction.svg)
