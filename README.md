@@ -17,7 +17,13 @@ solid domain and a straight line in the fluid domain. The solution will be conti
 function value but not flux along the interface. Final boundary conditions are $u = 0.3$ 
 at $x = 0$ and $u = 1.2$ at $x = 1$.
 
+### Requirements
+Tested on ``dolfinx 0.11.0``.
+
+
+### One-dimensional solution of above problem with restricted test functions on interface
 ![One-dimensional solution of problem](output/solution.svg)
 
-## Requirements
-Tested on ``dolfinx 0.11.0``.
+### Sparsity pattern of above problem with degree 1 Lagrange elements in one dimension.
+![One-dimensional solution of problem](output/sparsity.svg)
+

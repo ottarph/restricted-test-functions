@@ -87,9 +87,9 @@ Af.assemble()
 A = As + Af
 
 if MPI.COMM_WORLD.size == 1:
-    print("As =", As[:, :])
-    print("Af =", Af[:, :])
-    print("A =", A[:, :])
+    print("\nAs = \n", As[:, :])
+    print("\nAf =\n", Af[:, :])
+    print("\nA =\n", A[:, :])
 
     interface_x = V.tabulate_dof_coordinates()[dofs_interface[0]]
     print(f"{interface_x[0] = :.2f}")
@@ -157,4 +157,12 @@ if MPI.COMM_WORLD.size == 1 and mesh.topology.dim == 1:
 
     plt.legend()
     plt.savefig("output/solution.svg", metadata={"Date": None})
+
+    plt.figure()
+    plt.spy(A[:, :])
+    plt.axhline(y=dofs_interface[0] + 0.5, color="black", alpha=0.5, lw=0.2)
+    plt.axvline(x=dofs_interface[0] + 0.5, color="black", alpha=0.5, lw=0.2)
+
+    plt.savefig("output/sparsity.svg", metadata={"Date": None})
+
     plt.show()
