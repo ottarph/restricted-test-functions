@@ -12,8 +12,8 @@ gives dirichlet boundary condition to the fluid equation. The solid equation wil
 zero Neumann boundary condition on the interface. This is appropriate, since in the FSI
 context the force balance will give a Neumann term through the fluid stress.
 
-The source terms are chosen to be $f_S = 2$ and $f_F = 0$, resulting in a parabola in the 
-solid domain and a straight line in the fluid domain. The solution will be continuous in
+The source terms are chosen to be $f_S = 2$ and $f_F = -3$, resulting in a downward parabola in the 
+solid domain and an upward parabola in the fluid domain. The solution will be continuous in
 function value but not flux along the interface. Final boundary conditions are $u = 0.3$ 
 at $x = 0$ and $u = 1.2$ at $x = 1$.
 

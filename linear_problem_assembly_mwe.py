@@ -1,4 +1,5 @@
 import dolfinx.fem.petsc
+import dolfinx.la.petsc
 import numpy as np
 import scifem
 import ufl
@@ -69,75 +70,106 @@ dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct)
 dxF = dx(fluid_marker)
 dxS = dx(solid_marker)
 
-kernel = ufl.inner(ufl.grad(u), ufl.grad(v))
-
-kernelS = kernel * dxS
-compiled_solid = dolfinx.fem.form(kernelS)
-As = dolfinx.fem.petsc.assemble_matrix(compiled_solid, bcs=bcs)
-As.assemble()
-compiled_fluid = dolfinx.fem.form(kernel * dxF)
+f_S = dolfinx.fem.Constant(mesh, 2.0)
+f_F = dolfinx.fem.Constant(mesh, -3.0)
 
 
-Af = dolfinx.fem.petsc.assemble_matrix(compiled_fluid, bcs=bcs, diag=1.0)
-Af.assemble()
+bilinform = (
+    dolfinx.fem.Constant(mesh, 0.0) * ufl.inner(ufl.grad(u), ufl.grad(v)) * dxS
+    + dolfinx.fem.Constant(mesh, 1.0) * ufl.inner(ufl.grad(u), ufl.grad(v)) * dxF
+)
+linform = (
+    dolfinx.fem.Constant(mesh, 0.0) * ufl.inner(f_S, v) * dxS
+    + dolfinx.fem.Constant(mesh, 1.0) * ufl.inner(f_F, v) * dxF
+)
+
+petsc_options_prefix = "solver_"
+petsc_options = {
+    "ksp_type": "preonly",
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps",
+    "ksp_error_if_not_converged": True,
+    "ksp_monitor": None,
+}
+from custom_linear_problem import MyLinearProblem
+
+problem = MyLinearProblem(
+    bilinform,
+    linform,
+    bcs=[bcF],
+    petsc_options_prefix=petsc_options_prefix,
+    petsc_options=petsc_options,
+)
+
+
+A = problem.A
+b = problem.b
+
+problem.assemble_matrix()
+
 for bc in [bc_deactivate]:
     dofs, _ = bc._cpp_object.dof_indices()
-    Af.zeroRowsLocal(dofs, diag=0)
-Af.assemble()
-A = As + Af
+    A.zeroRowsLocal(dofs, diag=0)
+A.assemble()
+
+dolfinx.fem.petsc.assemble_matrix(
+    A, dolfinx.fem.form(ufl.inner(ufl.grad(u), ufl.grad(v)) * dxS), bcs=[bcS]
+)
+A.assemble()
 
 if MPI.COMM_WORLD.size == 1:
-    print("\nAs = \n", As[:, :])
-    print("\nAf =\n", Af[:, :])
     print("\nA =\n", A[:, :])
 
-    interface_x = V.tabulate_dof_coordinates()[dofs_interface[0]]
-    print(f"{interface_x[0] = :.2f}")
-
     with (
-        open("output/mwe_matvec.txt", "w") as f,
+        open("output/linprob_matvec.txt", "w") as f,
         np.printoptions(precision=2, linewidth=140),
     ):
         print("\nA =\n", A[:, :], file=f)
 
-
-f_S = dolfinx.fem.Constant(mesh, 2.0)
-f_F = dolfinx.fem.Constant(mesh, -3.0)
-Ls = ufl.inner(f_S, v) * dxS
-Lf = ufl.inner(f_F, v) * dxF
-
-bs = dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(Ls))
-dolfinx.fem.petsc.apply_lifting(bs, [compiled_solid], bcs=[bcs])
-bs.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-
-
-bf = dolfinx.fem.petsc.assemble_vector(dolfinx.fem.form(Lf))
-dolfinx.fem.petsc.apply_lifting(bf, [compiled_fluid], bcs=[bcs], alpha=1.0)
-
-
-# Accumulate ghost contributions after lifting, before any bc.set().
-bf.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-
-
-bcS.set(bs.array_w)
-
-# Zero out the row for disappearing test function.
-bc_deactivate.set(bf.array_w, alpha=0.0)
-
-bcF.set(bf.array_w)
-
-
-b = bs + bf
-# Final forward scatter, probably not needed.
-# b.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+problem.assemble_rhs()
 
 if MPI.COMM_WORLD.size == 1:
     with np.printoptions(precision=2, linewidth=140):
-        print("\nbs =", bs.array[:])
-        print("\nbf =", bf.array[:])
         print("\nb =", b.array[:])
 
-        with open("output/mwe_matvec.txt", "a") as f:
+bc_deactivate.set(b.array_w, alpha=0.0)
+# Clear ghost entries so the second reverse scatter only sends solid contributions
+with b.localForm() as b_loc:
+    b_loc.array[b.getLocalSize() :] = 0.0
+
+if MPI.COMM_WORLD.size == 1:
+    with np.printoptions(precision=2, linewidth=140):
+        print("\nb =", b.array[:])
+
+dolfinx.fem.petsc.assemble_vector(
+    b,
+    dolfinx.fem.form(ufl.inner(f_S, v) * dxS),
+)
+
+if MPI.COMM_WORLD.size == 1:
+    with np.printoptions(precision=2, linewidth=140):
+        print("\nb =", b.array[:])
+
+dolfinx.fem.petsc.apply_lifting(
+    b,
+    [dolfinx.fem.form(ufl.inner(ufl.grad(u), ufl.grad(v)) * dxS)],
+    alpha=1.0,
+    bcs=[[bcS]],
+)
+
+dolfinx.la.petsc._ghost_update(b, PETSc.InsertMode.ADD, PETSc.ScatterMode.REVERSE)
+
+if MPI.COMM_WORLD.size == 1:
+    with np.printoptions(precision=2, linewidth=140):
+        print("\nb =", b.array[:])
+
+bcS.set(b.array_w, alpha=1.0)
+
+if MPI.COMM_WORLD.size == 1:
+    with np.printoptions(precision=2, linewidth=140):
+        print("\nb =", b.array[:])
+
+        with open("output/linprob_matvec.txt", "a") as f:
             print("\nb =", b.array[:], file=f)
 
 
@@ -156,7 +188,7 @@ x.x.scatter_forward()
 if MPI.COMM_WORLD.size == 1:
     with (
         np.printoptions(precision=2, linewidth=140),
-        open("output/mwe_matvec.txt", "a") as f,
+        open("output/linprob_matvec.txt", "a") as f,
     ):
         print("\nx =", x.x.array[:], file=f)
 
@@ -181,13 +213,13 @@ if MPI.COMM_WORLD.size == 1 and mesh.topology.dim == 1:
     )
 
     plt.legend()
-    plt.savefig("output/solution.svg", metadata={"Date": None})
+    plt.savefig("output/linprob_solution.svg", metadata={"Date": None})
 
     plt.figure()
     plt.spy(A[:, :])
     plt.axhline(y=dofs_interface[0] + 0.5, color="black", alpha=0.5, lw=0.2)
     plt.axvline(x=dofs_interface[0] + 0.5, color="black", alpha=0.5, lw=0.2)
 
-    plt.savefig("output/sparsity.svg", metadata={"Date": None})
+    plt.savefig("output/linprob_sparsity.svg", metadata={"Date": None})
 
     plt.show()
