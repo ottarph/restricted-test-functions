@@ -193,7 +193,7 @@ if MPI.COMM_WORLD.size == 1:
         print("\nx =", x.x.array[:], file=f)
 
 
-writer = dolfinx.io.VTXWriter(mesh.comm, "output/solution.bp", [x])
+writer = dolfinx.io.VTXWriter(mesh.comm, "output/linprob_solution.bp", [x])
 writer.write(0)
 writer.close()
 
